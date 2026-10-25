@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Freshdesk New Ticket Alarm</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="status" class="status">Loading…</div>
+  <div id="warn" class="warn" hidden></div>
+
+  <dl class="grid">
+    <dt>Last check</dt><dd id="lastCheck">–</dd>
+    <dt>Heartbeat</dt><dd id="heartbeat">–</dd>
+    <dt>maxSeenId</dt><dd id="maxSeen">–</dd>
+    <dt>Tracked IDs</dt><dd id="seenCount">–</dd>
+    <dt>New tickets</dt><dd id="newCount">–</dd>
+    <dt>Watched tab</dt><dd id="tabs">–</dd>
+  </dl>
+  <div id="newList" class="newlist"></div>
+
+  <button id="ack" class="ack" disabled>Acknowledge</button>
+
+  <div class="row">
+    <button id="test">Test alarm</button>
+    <button id="testLost">Test lost alarm</button>
+  </div>
+
+  <label class="vol">Volume
+    <input type="range" id="vol" min="0" max="100" step="1">
+    <span id="volVal"></span>
+  </label>
+
+  <details>
+    <summary>Settings &amp; debug</summary>
+    <label class="check"><input type="checkbox" id="enabled"> Monitoring enabled</label>
+    <label class="check"><input type="checkbox" id="belowMax"> Alert on unseen IDs below maxSeenId</label>
+    <label class="field">Monitoring lost after (min)
+      <input type="number" id="lostAfter" min="1" max="60">
+    </label>
+    <label class="field">Watched path
+      <input type="text" id="watchPath" spellcheck="false">
+    </label>
+    <div class="row">
+      <button id="simulate">Simulate new ticket</button>
+      <button id="reset">Reset baseline</button>
+    </div>
+    <div id="msg" class="msg"></div>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>

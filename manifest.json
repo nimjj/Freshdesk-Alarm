@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Freshdesk New Ticket Alarm",
+  "version": "1.0.0",
+  "description": "Sounds a loud, repeating alarm when a new ticket appears in a watched Freshdesk view, and a different alert if monitoring stops working.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "alarms", "notifications", "offscreen", "power"],
+  "host_permissions": ["https://voicify-support.freshdesk.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://voicify-support.freshdesk.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Freshdesk New Ticket Alarm",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
