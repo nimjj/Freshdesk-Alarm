@@ -42,8 +42,6 @@ git clone https://github.com/nimjj/Freshdesk-Alarm.git
 cd Freshdesk-Alarm
 ```
 
-The default branch is `feature/freshdesk-alarm-extension`, so a plain clone checks it out. If a `main` branch is added later, add `-b feature/freshdesk-alarm-extension` to the clone command to get this one.
-
 Without git: on the repository page choose **Code, Download ZIP**, then extract it somewhere permanent.
 
 > **Keep the folder where it is.** Chrome loads an unpacked extension straight from its folder, so moving or deleting the folder breaks the extension.
