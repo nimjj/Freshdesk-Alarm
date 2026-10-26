@@ -1,6 +1,6 @@
 # Freshdesk New Ticket Alarm
 
-A Chrome extension (Manifest V3, vanilla JavaScript, no build step) that sounds a loud, repeating alarm when a **new ticket** shows up in a watched Freshdesk ticket view. It is built to run unattended for hours, and it raises a second, different alert if it stops being able to monitor.
+A Chrome extension (Manifest V3, vanilla JavaScript, no build step) that sounds a loud, repeating alarm when a **new ticket** shows up in a watched Freshdesk ticket view. It is built to run unattended for hours, and it raises a second, different alert if it stops being able to monitor. A big **ON/OFF switch** in the popup (with an optional "run for 1h / 2h / 4h / 8h" timer) lets you monitor only when you need to. It always starts **OFF**.
 
 Watched view (default): `https://voicify-support.freshdesk.com/a/tickets/filters/530853` ("My Open and Pending Tickets"). The path can be changed in the popup under **Settings & debug**.
 
@@ -59,12 +59,13 @@ If Chrome says "Manifest file is missing or unreadable", the wrong folder was se
 
 Install and start your auto-refresh extension on the Freshdesk tab (every 5 minutes). This extension does not refresh the page on its own. See the note at the top of this file.
 
-### 4. Open the watched view and start monitoring
+### 4. Open the watched view and switch monitoring ON
 
 1. Sign in to Freshdesk and open the watched view in its own tab. The default is `https://voicify-support.freshdesk.com/a/tickets/filters/530853` ("My Open and Pending Tickets").
 2. **Reload that tab once.** Chrome does not inject the extension into tabs that were already open when it was loaded.
-3. Open the popup. After a few seconds it should say **Monitoring**, with a last-check time and a `maxSeenId`. That first scan is a silent baseline, so no alarm sounds.
-4. Run the checks in [Testing](#testing) (Test alarm, then Simulate new ticket) before you leave it unattended.
+3. Open the popup. A fresh install is **OFF** (grey toolbar icon with an `OFF` badge). Flip the switch to **ON**, or pick a "Run for" time.
+4. After a few seconds the popup should say **Monitoring**, with a last-check time and a `maxSeenId`. The first scan is a silent baseline, so no alarm sounds.
+5. Run the checks in [Testing](#testing) (Test alarm, then Simulate new ticket) before you leave it unattended.
 
 ### Using it with a different Freshdesk account or view
 
@@ -83,12 +84,58 @@ Two things are specific to this setup:
 
 | Symptom | Fix |
 |---|---|
+| Popup says "Monitoring is OFF" | Monitoring is switched off. Flip the switch to ON or pick a "Run for" time. It is OFF on a fresh install and after every Chrome restart, and after a timer ends. |
 | Popup says "Waiting for first check" | Reload the Freshdesk tab. Check that "Watched tab" in the popup says the tab is open and that the tab is on the watched path. |
 | "Watched tab: NOT OPEN" | No tab is on exactly the watched path. Open the view, or correct **Watched path** in Settings. |
 | Popup shows page state `parse-error` or `no-list` | Freshdesk's markup changed or the list has not rendered. See Limitations. |
 | No sound on Test alarm | Check system volume and that Chrome is not muted in the Windows volume mixer. The popup shows a warning if the browser blocks audio. |
 | No notifications | Turn off Windows Focus Assist / Do Not Disturb and allow Chrome notifications in Windows settings. The siren still plays. |
-| "Monitoring lost" keeps sounding | No successful check in 12 minutes. Confirm you are signed in, the tab is open, and the auto-refresh extension is running. |
+| "Monitoring lost" keeps sounding | No successful check in 12 minutes. Confirm you are signed in, the tab is open, and the auto-refresh extension is running. If you don't need monitoring right now, switch it OFF. |
+
+---
+
+## Turning monitoring on and off
+
+The popup opens with a status card at the top. The switch on its right is the on/off control.
+
+```
+OFF                                  ON for 4 hours
++-------------------------------+    +-------------------------------+
+| FRESHDESK ALARM               |    | FRESHDESK ALARM               |
+| Monitoring is OFF     ( OFF o)|    | Monitoring            (o ON  )|
+| No alarms will sound.         |    | Last check 42s ago, 1 in view |
+|                               |    | Turns off automatically in    |
+| Run for [1h][2h][4h][8h][inf] |    |   3h 59m                      |
++-------------------------------+    | Run for [1h][2h][4h*][8h][inf]|
+                                     +-------------------------------+
+```
+
+- **Switch:** ON means monitoring with no time limit. OFF stops it.
+- **Run for 1h / 2h / 4h / 8h:** turns monitoring ON and switches it OFF by itself when the time is up, so you cannot leave it on overnight by accident. The highlighted chip shows the timer in use, and the card shows a live countdown. Click a chip again to restart the timer. The infinity chip means no limit (same as the switch).
+- **Status colours:** green = monitoring, blue = waiting for the first check, red (pulsing) = new-ticket alarm, orange = monitoring lost, grey = OFF.
+- **Toolbar icon:** colour bell when ON, grey bell with a grey `OFF` badge when OFF. A red badge with a number means new tickets are waiting, and an orange `!` means monitoring is lost.
+- **When the timer ends:** monitoring turns OFF and a short silent notification says so.
+
+### What OFF does
+
+| | |
+|---|---|
+| New-ticket alarm | Off. Scans of the ticket list are ignored. |
+| Monitoring-lost alarm | **Off.** This is the point of the switch: closing Freshdesk while OFF no longer makes it scream. |
+| Active alarm | Switching OFF silences it and clears the badge and notifications. |
+| Keep-awake | Released, so Windows can sleep again. |
+| Test alarm / Test lost alarm | Still work, so you can check your speakers any time. |
+| Simulate new ticket | Disabled until monitoring is ON. |
+
+### What happens when you switch ON
+
+- The monitoring-lost clock restarts, so you get the full 12 minutes to open the Freshdesk tab.
+- The extension asks open Freshdesk tabs to rescan right away.
+- Tickets that arrived while it was OFF are not lost. Seen ticket IDs are only updated while ON, so the first scan after switching ON alarms for any ID the extension has not seen before.
+
+### Restarts
+
+Every time Chrome starts, the extension starts **OFF**, and any timer is cleared. A forgotten ON can never scream the next day. The flip side is that after a restart you must switch it ON again. Reloading the extension from `chrome://extensions` keeps whatever state it was in.
 
 ---
 
@@ -114,7 +161,8 @@ Freshdesk shows a "No tickets here!" element when the view is empty. That counts
 
 ### Monitoring-lost heartbeat
 
-- A `chrome.alarms` heartbeat ticks every minute. It also calls `chrome.power.requestKeepAwake` and revives the alarm sound if the service worker was restarted.
+- This only runs while monitoring is **ON**. While OFF there is no lost alarm.
+- A `chrome.alarms` heartbeat ticks every minute. It also calls `chrome.power.requestKeepAwake`, revives the alarm sound if the service worker was restarted, and acts as a backup that switches monitoring OFF if a "run for" timer is overdue.
 - A scan only counts as "alive" on a **fresh page load** or when the **ticket list changed**. A tab that is sitting there unchanged because the refresher died does not count.
 - If there has been no successful check for more than 12 minutes (editable, 1 to 60), the **monitoring lost** alarm sounds. This covers a closed tab, a logged-out Freshdesk, a dead refresher, or a broken selector.
 - Acknowledging it silences it. If monitoring is still lost 15 minutes later, it sounds again. It clears automatically once a check succeeds.
@@ -134,26 +182,29 @@ Both loop until you click **Acknowledge** in the popup or the notification.
 
 ## Popup
 
-- Status: Monitoring / Paused / Waiting for first check / ALARM / MONITORING LOST
-- Last check time, background heartbeat time, `maxSeenId`, number of tracked IDs, pending new tickets, whether the watched tab is open
+- Status card with the **ON/OFF switch**, the "Run for" timer chips and a countdown (see [Turning monitoring on and off](#turning-monitoring-on-and-off)). Status: Monitoring is OFF / Waiting for first check / Monitoring / ALARM / MONITORING LOST
+- Last check time, background heartbeat time, `maxSeenId`, number of tracked IDs, pending new tickets, whether the watched tab is open (dimmed while OFF)
 - **Acknowledge**, **Test alarm**, **Test lost alarm**, volume slider
-- **Settings & debug**: enable/disable, alert-below-max toggle, lost-after minutes, watched path, **Simulate new ticket**, **Reset baseline**
+- **Settings & debug**: alert-below-max toggle, lost-after minutes, watched path, **Simulate new ticket** (needs monitoring ON), **Reset baseline**
 
 ---
 
 ## Testing
 
-1. **Test alarm** and **Test lost alarm** in the popup. Confirm you can hear both, then Acknowledge.
-2. **Simulate new ticket** (Settings & debug): injects a yellow "SIMULATED" row with ID `maxSeenId + 1` into the list and runs the real detection path. Simulated IDs are never saved as seen, so they cannot hide a real ticket. Acknowledge removes the row.
+1. **Test alarm** and **Test lost alarm** in the popup (they work even while OFF). Confirm you can hear both, then Acknowledge.
+2. Switch monitoring **ON**, then use **Simulate new ticket** (Settings & debug): injects a yellow "SIMULATED" row with ID `maxSeenId + 1` into the list and runs the real detection path. Simulated IDs are never saved as seen, so they cannot hide a real ticket. Acknowledge removes the row.
 3. Press F5 on the watched view several times: no alarm.
-4. Set "Monitoring lost after" to 1 minute and close the tab: the lost alarm sounds within about 2 minutes. Set it back to 12.
-5. End to end: assign a ticket to yourself in Freshdesk and wait for the next refresh.
+4. With monitoring ON, set "Monitoring lost after" to 1 minute and close the tab: the lost alarm sounds within about 2 minutes. Set it back to 12.
+5. Switch monitoring **OFF** and close the tab: no lost alarm, however long you wait.
+6. Timer check without waiting an hour: open the extension's service worker console (`chrome://extensions`, "Inspect views: service worker") and run `chrome.runtime.sendMessage({type:'cmd',cmd:'setPower',on:true,minutes:0.5})`. The popup shows a countdown, and after about 30 seconds monitoring switches OFF with a notification.
+7. Quit and reopen Chrome: the extension starts OFF.
+8. End to end: switch ON, assign a ticket to yourself in Freshdesk and wait for the next refresh.
 
 ---
 
 ## Keeping the PC awake for long runs
 
-- The extension asks Windows not to sleep while it is enabled. The screen may still turn off. This does not stop lid-close, a manual sleep, or a Windows Update restart.
+- The extension asks Windows not to sleep while monitoring is **ON** (it lets go when you switch OFF). The screen may still turn off. This does not stop lid-close, a manual sleep, or a Windows Update restart.
 - Plug in. In **Settings, System, Power & battery**, set "When plugged in, put my device to sleep after" to **Never**.
 - If the lid will be closed, set the lid-close action (Control Panel, Power Options) to **Do nothing**.
 - In `chrome://settings/performance`, add `voicify-support.freshdesk.com` under **Always keep these sites active** so Chrome never discards the tab.
@@ -168,10 +219,10 @@ Both loop until you click **Acknowledge** in the popup or the notification.
 |---|---|
 | `manifest.json` | Manifest V3 config, permissions, content script match |
 | `content.js` | Scans the ticket list, reports IDs, handles the simulate row |
-| `background.js` | Service worker: baseline, new-ticket detection, alarms, heartbeat, badge, notifications, offscreen lifecycle |
+| `background.js` | Service worker: ON/OFF and timer, baseline, new-ticket detection, alarms, heartbeat, badge and toolbar icon, notifications, offscreen lifecycle |
 | `offscreen.html` / `offscreen.js` | Web Audio alarm player |
-| `popup.html` / `popup.js` / `popup.css` | Status UI and controls |
-| `icons/` | Extension and notification icons |
+| `popup.html` / `popup.js` / `popup.css` | Status card, ON/OFF switch, run-for timer and controls |
+| `icons/` | `icon*.png` colour bell (ON, notifications), `off*.png` grey bell (OFF) |
 
 ## Limitations
 

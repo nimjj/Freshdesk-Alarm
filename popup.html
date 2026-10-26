@@ -5,19 +5,43 @@
   <title>Freshdesk New Ticket Alarm</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <div id="status" class="status">Loading…</div>
+<body class="off">
+  <header id="hero" class="hero off">
+    <div class="hero-top">
+      <div class="hero-text">
+        <div class="hero-title">Freshdesk Alarm</div>
+        <div id="statusText" class="hero-status">Loading…</div>
+        <div id="statusSub" class="hero-sub"></div>
+        <div id="timerLine" class="hero-timer" hidden></div>
+      </div>
+      <button id="power" class="switch" type="button" role="switch" aria-checked="false" aria-label="Monitoring on or off">
+        <span class="switch-label">OFF</span>
+        <span class="knob"></span>
+      </button>
+    </div>
+    <div class="runfor" role="group" aria-label="Turn on for">
+      <span class="runfor-label">Run for</span>
+      <button class="chip" type="button" data-min="60">1h</button>
+      <button class="chip" type="button" data-min="120">2h</button>
+      <button class="chip" type="button" data-min="240">4h</button>
+      <button class="chip" type="button" data-min="480">8h</button>
+      <button class="chip" type="button" data-min="0" title="No time limit" aria-label="No time limit">&infin;</button>
+    </div>
+  </header>
+
   <div id="warn" class="warn" hidden></div>
 
-  <dl class="grid">
-    <dt>Last check</dt><dd id="lastCheck">–</dd>
-    <dt>Heartbeat</dt><dd id="heartbeat">–</dd>
-    <dt>maxSeenId</dt><dd id="maxSeen">–</dd>
-    <dt>Tracked IDs</dt><dd id="seenCount">–</dd>
-    <dt>New tickets</dt><dd id="newCount">–</dd>
-    <dt>Watched tab</dt><dd id="tabs">–</dd>
-  </dl>
-  <div id="newList" class="newlist"></div>
+  <main class="body">
+    <dl class="grid">
+      <dt>Last check</dt><dd id="lastCheck">–</dd>
+      <dt>Heartbeat</dt><dd id="heartbeat">–</dd>
+      <dt>maxSeenId</dt><dd id="maxSeen">–</dd>
+      <dt>Tracked IDs</dt><dd id="seenCount">–</dd>
+      <dt>New tickets</dt><dd id="newCount">–</dd>
+      <dt>Watched tab</dt><dd id="tabs">–</dd>
+    </dl>
+    <div id="newList" class="newlist"></div>
+  </main>
 
   <button id="ack" class="ack" disabled>Acknowledge</button>
 
@@ -33,7 +57,6 @@
 
   <details>
     <summary>Settings &amp; debug</summary>
-    <label class="check"><input type="checkbox" id="enabled"> Monitoring enabled</label>
     <label class="check"><input type="checkbox" id="belowMax"> Alert on unseen IDs below maxSeenId</label>
     <label class="field">Monitoring lost after (min)
       <input type="number" id="lostAfter" min="1" max="60">
@@ -45,6 +68,7 @@
       <button id="simulate">Simulate new ticket</button>
       <button id="reset">Reset baseline</button>
     </div>
+    <div id="simHint" class="hint" hidden>Turn monitoring on to use Simulate.</div>
     <div id="msg" class="msg"></div>
   </details>
 

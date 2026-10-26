@@ -4,10 +4,16 @@ const HEARTBEAT = 'heartbeat';
 const FD_URL = 'https://voicify-support.freshdesk.com/*';
 const SEEN_CAP = 5000;
 const LOST_REMIND_MS = 15 * 60 * 1000; // re-sound "lost" this long after it was acknowledged, if still lost
-const NOTIF = { new: 'fdm-new', lost: 'fdm-lost', test: 'fdm-test' };
+const AUTO_OFF = 'autoOff'; // one-shot alarm that ends a "turn on for…" timer
+const MAX_TIMER_MIN = 7 * 24 * 60;
+const NOTIF = { new: 'fdm-new', lost: 'fdm-lost', test: 'fdm-test', off: 'fdm-off' };
+const ICONS = {
+  on: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' },
+  off: { 16: 'icons/off16.png', 48: 'icons/off48.png', 128: 'icons/off128.png' },
+};
 
 const DEFAULT_SETTINGS = {
-  enabled: true,
+  enabled: false, // always OFF on a fresh install and after every browser start
   watchPath: '/a/tickets/filters/530853',
   alertOnUnseenBelowMax: true,
   volume: 0.8,
@@ -28,6 +34,8 @@ const DEFAULT_STATE = {
   issueState: null,
   issueAt: 0,
   monitoringSince: 0,
+  enabledUntil: 0, // end of the "turn on for…" timer; 0 = no limit
+  timerMin: 0,     // length of that timer in minutes (popup highlights the matching chip)
   lostAckedAt: 0,
   lastHeartbeatAt: 0,
   audioState: null,
@@ -86,24 +94,36 @@ function setBadge(text, color) {
   chrome.action.setBadgeText({ text });
   if (color) chrome.action.setBadgeBackgroundColor({ color });
 }
-function notify(id, title, message) {
+// Derives the toolbar badge from stored state: alarm count / "!" while alarming, grey "OFF" when off, else blank.
+async function syncBadge() {
+  const { settings, st } = await load();
+  if (st.alarmKind === 'new') setBadge(String(st.pendingNew.length + st.pendingSim.length), '#d93025');
+  else if (st.alarmKind === 'lost') setBadge('!', '#b06000');
+  else if (!settings.enabled) setBadge('OFF', '#757575');
+  else setBadge('', null);
+}
+// Colour bell while monitoring, grey bell while off.
+async function syncIcon() {
+  const { settings } = await load();
+  await chrome.action.setIcon({ path: settings.enabled ? ICONS.on : ICONS.off });
+}
+const syncUi = () => Promise.all([syncBadge(), syncIcon()]);
+// Sticky notifications (default) carry an Acknowledge button; { sticky: false } is an FYI that times out.
+function notify(id, title, message, { sticky = true } = {}) {
   return new Promise((resolve) => {
     chrome.notifications.clear(id, () => {
       void chrome.runtime.lastError;
-      chrome.notifications.create(
-        id,
-        {
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title,
-          message,
-          priority: 2,
-          requireInteraction: true,
-          silent: true, // the offscreen alarm is the sound
-          buttons: [{ title: 'Acknowledge' }],
-        },
-        () => { void chrome.runtime.lastError; resolve(); }
-      );
+      const opts = {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title,
+        message,
+        priority: sticky ? 2 : 0,
+        requireInteraction: sticky,
+        silent: true, // the offscreen alarm is the sound
+      };
+      if (sticky) opts.buttons = [{ title: 'Acknowledge' }];
+      chrome.notifications.create(id, opts, () => { void chrome.runtime.lastError; resolve(); });
     });
   });
 }
@@ -184,9 +204,56 @@ async function acknowledge() {
   if (st.alarmKind === 'lost') patch.lostAckedAt = Date.now();
   await patchState(patch);
   await safe(stopAlarm);
-  await safe(() => setBadge('', null));
+  await safe(syncBadge);
   await safe(clearAllNotifications);
   await safe(() => pokeTabs('removeFake'));
+}
+
+// Single entry point for turning monitoring ON (optionally for `minutes`) or OFF.
+async function setPower(on, minutes, reason) {
+  if (on) {
+    const mins = Math.min(Number(minutes) || 0, MAX_TIMER_MIN);
+    const now = Date.now();
+    const until = mins > 0 ? now + mins * 60000 : 0;
+    await patchSettings({ enabled: true });
+    // restart the lost-alarm clock so there is a full grace period to open the tab
+    await patchState({ monitoringSince: now, lostAckedAt: 0, enabledUntil: until, timerMin: mins > 0 ? mins : 0 });
+    if (until) chrome.alarms.create(AUTO_OFF, { when: until });
+    else chrome.alarms.clear(AUTO_OFF);
+    try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
+    await safe(syncUi);
+    await safe(() => pokeTabs('rescan'));
+  } else {
+    await patchSettings({ enabled: false });
+    await patchState({ enabledUntil: 0, timerMin: 0 });
+    chrome.alarms.clear(AUTO_OFF);
+    await acknowledge(); // silences any active alarm and refreshes the badge
+    try { chrome.power.releaseKeepAwake(); } catch (e) { /* ignore */ }
+    await safe(syncUi);
+    if (reason === 'timer') {
+      await safe(() =>
+        notify(NOTIF.off, 'Freshdesk monitoring turned OFF', 'The "turn on for…" timer ended. Switch it back on in the popup when you need it.', { sticky: false })
+      );
+    }
+  }
+}
+
+// Turns monitoring off when the timer has run out (alarm fired, or the heartbeat noticed first).
+async function expireTimerIfDue() {
+  const { settings, st } = await load();
+  if (settings.enabled && st.enabledUntil && Date.now() >= st.enabledUntil - 1000) {
+    await setPower(false, 0, 'timer');
+    return true;
+  }
+  return false;
+}
+async function rearmAutoOff() {
+  const { settings, st } = await load();
+  if (settings.enabled && st.enabledUntil > Date.now()) {
+    chrome.alarms.get(AUTO_OFF, (a) => {
+      if (!a) chrome.alarms.create(AUTO_OFF, { when: st.enabledUntil });
+    });
+  }
 }
 
 // ---------- scan handling ----------
@@ -212,15 +279,16 @@ async function handleScan(msg) {
   let alarmKind = st.alarmKind;
   let pending = st.pendingNew;
   let pendingSim = st.pendingSim;
+  let clearedLost = false;
 
   if (heartbeat) {
     patch.lastCheckAt = now;
     patch.lostAckedAt = 0;
     if (alarmKind === 'lost') { // monitoring is back
       alarmKind = null;
+      clearedLost = true;
       await safe(stopAlarm);
       await safe(clearAllNotifications);
-      await safe(() => setBadge('', null));
     }
   }
 
@@ -254,6 +322,8 @@ async function handleScan(msg) {
   if (raise) {
     console.log('[fdm] new tickets', newIds, 'simulated', sim);
     await raiseNew(pending, pendingSim);
+  } else if (clearedLost) {
+    await safe(syncBadge); // state is saved now, so the badge reflects "lost" being cleared
   }
   return { ok: true };
 }
@@ -265,6 +335,7 @@ async function onHeartbeat() {
   const now = Date.now();
   await patchState({ lastHeartbeatAt: now });
 
+  if (await expireTimerIfDue()) return; // backup for the autoOff alarm
   if (!settings.enabled) return;
   try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
 
@@ -327,20 +398,13 @@ async function handleCmd(msg) {
       return { ok: true };
     }
 
+    case 'setPower':
+      await setPower(!!msg.on, msg.minutes, 'user');
+      return { ok: true };
+
     case 'setSetting': {
       const { key, value } = msg;
-      if (key === 'enabled') {
-        const on = !!value;
-        await patchSettings({ enabled: on });
-        if (on) {
-          await patchState({ monitoringSince: Date.now(), lostAckedAt: 0 });
-          try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
-          await pokeTabs('rescan');
-        } else {
-          await acknowledge();
-          try { chrome.power.releaseKeepAwake(); } catch (e) { /* ignore */ }
-        }
-      } else if (key === 'alertOnUnseenBelowMax') {
+      if (key === 'alertOnUnseenBelowMax') {
         await patchSettings({ alertOnUnseenBelowMax: !!value });
       } else if (key === 'lostAfterMin') {
         await patchSettings({ lostAfterMin: Math.min(60, Math.max(1, Math.round(Number(value)) || 12)) });
@@ -384,11 +448,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === HEARTBEAT) enqueue(onHeartbeat);
+  else if (a.name === AUTO_OFF) enqueue(expireTimerIfDue);
 });
 
 chrome.notifications.onButtonClicked.addListener(() => enqueue(acknowledge));
-chrome.notifications.onClicked.addListener(() =>
+chrome.notifications.onClicked.addListener((id) =>
   enqueue(async () => {
+    if (id === NOTIF.off) { // FYI notice: just dismiss it
+      await new Promise((r) => chrome.notifications.clear(id, () => r()));
+      return;
+    }
     await acknowledge();
     const tabs = await watchTabs();
     if (tabs[0]) {
@@ -398,20 +467,31 @@ chrome.notifications.onClicked.addListener(() =>
   })
 );
 
+// Install / reload: a fresh install starts OFF (default); a reload keeps whatever state was saved.
 chrome.runtime.onInstalled.addListener(() =>
   enqueue(async () => {
     const { settings } = await load();
     await chrome.storage.local.set({ settings });
     await patchState({ monitoringSince: Date.now() });
     ensureHeartbeatAlarm();
-    try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
+    await rearmAutoOff();
+    if (settings.enabled) {
+      try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
+    }
+    await safe(syncUi);
   })
 );
+// Every browser launch starts OFF, so a forgotten ON can never scream the next day.
 chrome.runtime.onStartup.addListener(() =>
   enqueue(async () => {
-    await patchState({ monitoringSince: Date.now(), lostAckedAt: 0 });
+    await patchSettings({ enabled: false });
+    await patchState({ enabledUntil: 0, monitoringSince: Date.now(), lostAckedAt: 0 });
+    chrome.alarms.clear(AUTO_OFF);
+    await acknowledge();
+    try { chrome.power.releaseKeepAwake(); } catch (e) { /* ignore */ }
     ensureHeartbeatAlarm();
-    try { chrome.power.requestKeepAwake('system'); } catch (e) { /* ignore */ }
+    await safe(syncUi);
   })
 );
 ensureHeartbeatAlarm();
+rearmAutoOff();

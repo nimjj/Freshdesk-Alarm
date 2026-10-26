@@ -12,23 +12,50 @@ function ago(ms) {
 }
 const clock = (t) => new Date(t).toLocaleTimeString();
 
-function setStatus(text, cls) {
-  const el = $('status');
-  el.textContent = text;
-  el.className = 'status ' + cls;
+// "3h 12m", "12m 05s", "45s"
+function remaining(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h) return h + 'h ' + m + 'm';
+  if (m) return m + 'm ' + String(s % 60).padStart(2, '0') + 's';
+  return s + 's';
+}
+
+// cls drives the hero colour: ok | wait | alarm | lost | off
+function setHero(text, sub, cls) {
+  $('statusText').textContent = text;
+  $('statusSub').textContent = sub;
+  $('hero').className = 'hero ' + cls;
+  document.body.classList.toggle('off', cls === 'off');
 }
 
 function render({ settings, st, now, watchTabs }) {
   const base = Math.max(st.lastCheckAt, st.monitoringSince);
   const lostNow = settings.enabled && now - base > settings.lostAfterMin * 60000;
   const alarming = st.alarmKind === 'new' || st.alarmKind === 'test';
+  const lastCheck = st.lastCheckAt ? 'Last check ' + ago(now - st.lastCheckAt) + ', ' + st.lastCheckCount + ' in view' : '';
 
-  if (!settings.enabled) setStatus('Paused', 'off');
-  else if (alarming) setStatus('ALARM: new ticket', 'alarm');
-  else if (st.alarmKind === 'lost') setStatus('MONITORING LOST', 'lost');
-  else if (lostNow) setStatus('Monitoring lost (acknowledged)', 'lost');
-  else if (!st.lastCheckAt) setStatus('Waiting for first check…', 'wait');
-  else setStatus('Monitoring', 'ok');
+  if (alarming) setHero('ALARM: new ticket', 'Acknowledge to silence it.', 'alarm');
+  else if (st.alarmKind === 'lost') setHero('MONITORING LOST', 'No successful check for ' + Math.round((now - base) / 60000) + ' min.', 'lost');
+  else if (!settings.enabled) setHero('Monitoring is OFF', 'No alarms will sound.', 'off');
+  else if (lostNow) setHero('Monitoring lost', 'Acknowledged. Check the Freshdesk tab.', 'lost');
+  else if (!st.lastCheckAt) setHero('Waiting for first check…', 'Open or reload the watched Freshdesk tab.', 'wait');
+  else setHero('Monitoring', lastCheck, 'ok');
+
+  // power switch, run-for chips and countdown
+  const power = $('power');
+  power.setAttribute('aria-checked', String(settings.enabled));
+  power.querySelector('.switch-label').textContent = settings.enabled ? 'ON' : 'OFF';
+  document.querySelectorAll('.chip').forEach((c) => {
+    c.classList.toggle('active', settings.enabled && Number(c.dataset.min) === (st.timerMin || 0));
+  });
+  const timer = $('timerLine');
+  timer.hidden = !(settings.enabled && st.enabledUntil);
+  if (!timer.hidden) timer.textContent = 'Turns off automatically in ' + remaining(st.enabledUntil - now);
+
+  $('simulate').disabled = !settings.enabled;
+  $('simHint').hidden = settings.enabled;
 
   const warn = [];
   if (st.audioState && st.audioState !== 'running' && st.alarmKind) warn.push('Audio is ' + st.audioState + ': the alarm may be silent.');
@@ -67,7 +94,6 @@ function render({ settings, st, now, watchTabs }) {
   const idle = (el) => document.activeElement !== el;
   if (idle($('vol'))) { $('vol').value = Math.round(settings.volume * 100); }
   $('volVal').textContent = Math.round(settings.volume * 100) + '%';
-  if (idle($('enabled'))) $('enabled').checked = settings.enabled;
   if (idle($('belowMax'))) $('belowMax').checked = settings.alertOnUnseenBelowMax;
   if (idle($('lostAfter'))) $('lostAfter').value = settings.lostAfterMin;
   if (idle($('watchPath'))) $('watchPath').value = settings.watchPath;
@@ -78,7 +104,7 @@ async function refresh() {
     const res = await send('getState');
     if (res && res.ok) render(res);
   } catch (e) {
-    setStatus('Background not responding', 'lost');
+    setHero('Background not responding', 'Reload the extension in chrome://extensions.', 'lost');
   }
 }
 
@@ -99,7 +125,13 @@ $('vol').addEventListener('input', () => {
   $('volVal').textContent = $('vol').value + '%';
   send('setVolume', { value: $('vol').value / 100 });
 });
-$('enabled').addEventListener('change', () => act('setSetting', { key: 'enabled', value: $('enabled').checked }));
+$('power').addEventListener('click', () => {
+  const on = $('power').getAttribute('aria-checked') !== 'true';
+  act('setPower', { on }); // switch ON = no time limit
+});
+document.querySelectorAll('.chip').forEach((chip) => {
+  chip.addEventListener('click', () => act('setPower', { on: true, minutes: Number(chip.dataset.min) }));
+});
 $('belowMax').addEventListener('change', () => act('setSetting', { key: 'alertOnUnseenBelowMax', value: $('belowMax').checked }));
 $('lostAfter').addEventListener('change', () => act('setSetting', { key: 'lostAfterMin', value: $('lostAfter').value }));
 $('watchPath').addEventListener('change', () => act('setSetting', { key: 'watchPath', value: $('watchPath').value }));
