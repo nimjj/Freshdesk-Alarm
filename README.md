@@ -29,17 +29,68 @@ Watched view (default): `https://voicify-support.freshdesk.com/a/tickets/filters
 
 ---
 
-## Install (load unpacked)
+## Quick start: clone and run
 
-1. Clone or download this repository.
-2. Open `chrome://extensions` and turn on **Developer mode**.
-3. Click **Load unpacked** and select the repository folder (the one containing `manifest.json`).
-4. Pin the extension from the puzzle-piece menu.
-5. Open the watched view in its own tab and make sure the auto-refresh extension is running on it.
-6. **Reload that tab once.** Chrome does not inject the extension into tabs that were already open.
-7. Open the popup. After the first scan it should say **Monitoring**, with a last-check time and a `maxSeenId`.
+There is **no build step and nothing to install** (no npm, no bundler). The repository root is the extension, so cloning it and loading that folder in Chrome is all it takes.
 
-After editing any file, click the reload icon on the extension card, then reload the Freshdesk tab.
+### 1. Get the code
+
+With git:
+
+```bash
+git clone https://github.com/nimjj/Freshdesk-Alarm.git
+cd Freshdesk-Alarm
+```
+
+The default branch is `feature/freshdesk-alarm-extension`, so a plain clone checks it out. If a `main` branch is added later, add `-b feature/freshdesk-alarm-extension` to the clone command to get this one.
+
+Without git: on the repository page choose **Code, Download ZIP**, then extract it somewhere permanent.
+
+> **Keep the folder where it is.** Chrome loads an unpacked extension straight from its folder, so moving or deleting the folder breaks the extension.
+
+### 2. Load it into Chrome
+
+1. Open `chrome://extensions` in Chrome 116 or newer.
+2. Turn on **Developer mode** (top right).
+3. Click **Load unpacked** and select the folder that contains `manifest.json` (the cloned `Freshdesk-Alarm` folder, not a parent or a subfolder).
+4. The extension **Freshdesk New Ticket Alarm** appears with a blue bell icon. Pin it from the puzzle-piece menu.
+
+If Chrome says "Manifest file is missing or unreadable", the wrong folder was selected. Pick the folder that directly contains `manifest.json`.
+
+### 3. Set up the auto-refresh extension
+
+Install and start your auto-refresh extension on the Freshdesk tab (every 5 minutes). This extension does not refresh the page on its own. See the note at the top of this file.
+
+### 4. Open the watched view and start monitoring
+
+1. Sign in to Freshdesk and open the watched view in its own tab. The default is `https://voicify-support.freshdesk.com/a/tickets/filters/530853` ("My Open and Pending Tickets").
+2. **Reload that tab once.** Chrome does not inject the extension into tabs that were already open when it was loaded.
+3. Open the popup. After a few seconds it should say **Monitoring**, with a last-check time and a `maxSeenId`. That first scan is a silent baseline, so no alarm sounds.
+4. Run the checks in [Testing](#testing) (Test alarm, then Simulate new ticket) before you leave it unattended.
+
+### Using it with a different Freshdesk account or view
+
+Two things are specific to this setup:
+
+- **Domain.** `voicify-support.freshdesk.com` appears in `manifest.json` (`host_permissions` and the content script `matches`), in `FD_URL` in `background.js`, and in the ticket link in `popup.js`. Change those to your own Freshdesk domain.
+- **Watched view.** `530853` is a saved view ID in this Freshdesk account. Open your own view and copy its path (for example `/a/tickets/filters/123456`) into **Settings & debug, Watched path** in the popup. Changing the path resets the baseline.
+
+### Updating and editing
+
+- To get changes: `git pull`, then click the reload icon on the extension card in `chrome://extensions`, then reload the Freshdesk tab.
+- The same reload steps apply after you edit any file yourself.
+- Your saved data (seen ticket IDs and settings) lives in `chrome.storage.local`, so it survives reloads and updates. It is cleared if you remove the extension.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Popup says "Waiting for first check" | Reload the Freshdesk tab. Check that "Watched tab" in the popup says the tab is open and that the tab is on the watched path. |
+| "Watched tab: NOT OPEN" | No tab is on exactly the watched path. Open the view, or correct **Watched path** in Settings. |
+| Popup shows page state `parse-error` or `no-list` | Freshdesk's markup changed or the list has not rendered. See Limitations. |
+| No sound on Test alarm | Check system volume and that Chrome is not muted in the Windows volume mixer. The popup shows a warning if the browser blocks audio. |
+| No notifications | Turn off Windows Focus Assist / Do Not Disturb and allow Chrome notifications in Windows settings. The siren still plays. |
+| "Monitoring lost" keeps sounding | No successful check in 12 minutes. Confirm you are signed in, the tab is open, and the auto-refresh extension is running. |
 
 ---
 
